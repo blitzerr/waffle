@@ -1,7 +1,6 @@
 #pragma once
 
 #include <cstdint>
-#include <initializer_list>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -9,7 +8,6 @@
 #include <thread>
 #include <type_traits>
 #include <unordered_map>
-#include <vector>
 
 #include <waffle/helpers/mpsc_ring_buffer.hpp>
 
@@ -121,12 +119,13 @@ struct alignas(CACHE_LINE_SIZE) Tracelet {
 
   // Constructor for SPAN_START, EVENT (with attributes)
   Tracelet(uint64_t ts, Id t_id, Id s_id, Id p_span_id, Id c_id,
-             uint64_t name_h, RecordType rtype,
-             const std::array<Attribute, MAX_ATTRIBUTES_PER_TRACELET>& event_attrs_array,
-             uint8_t actual_attr_count)
-      : timestamp(ts), trace_id(t_id), span_id(s_id),
-        parent_span_id(p_span_id), cause_id(c_id), name_string_hash(name_h),
-        record_type(rtype), num_attributes(actual_attr_count) {
+           uint64_t name_h, RecordType rtype,
+           const std::array<Attribute, MAX_ATTRIBUTES_PER_TRACELET>
+               &event_attrs_array,
+           uint8_t actual_attr_count)
+      : timestamp(ts), trace_id(t_id), span_id(s_id), parent_span_id(p_span_id),
+        cause_id(c_id), name_string_hash(name_h), record_type(rtype),
+        num_attributes(actual_attr_count) {
     std::fill_n(padding, sizeof(padding) / sizeof(padding[0]), 0);
     for (uint8_t i = 0; i < actual_attr_count; ++i) {
       attributes[i] = event_attrs_array[i];
@@ -139,10 +138,10 @@ struct alignas(CACHE_LINE_SIZE) Tracelet {
 
   // Constructor for SPAN_END (no attributes)
   Tracelet(uint64_t ts, Id t_id, Id s_id, Id p_span_id, Id c_id,
-             uint64_t name_h, RecordType rtype)
-      : timestamp(ts), trace_id(t_id), span_id(s_id),
-        parent_span_id(p_span_id), cause_id(c_id), name_string_hash(name_h),
-        record_type(rtype), num_attributes(0) {
+           uint64_t name_h, RecordType rtype)
+      : timestamp(ts), trace_id(t_id), span_id(s_id), parent_span_id(p_span_id),
+        cause_id(c_id), name_string_hash(name_h), record_type(rtype),
+        num_attributes(0) {
     std::fill_n(padding, sizeof(padding) / sizeof(padding[0]), 0);
     // Default initialize all Attribute objects
     for (size_t i = 0; i < MAX_ATTRIBUTES_PER_TRACELET; ++i) {
@@ -182,17 +181,20 @@ public:
   Tracer();
   ~Tracer();
 
-  template<typename... AttrArgs>
-  Span start_span(const StaticStringSource &name, Id parent, Id cause, AttrArgs&&... attr_args);
+  template <typename... AttrArgs>
+  Span start_span(const StaticStringSource &name, Id parent, Id cause,
+                  AttrArgs &&...attr_args);
 
-  template<typename... AttrArgs>
-  Span start_span(std::string_view name, Id parent, Id cause, AttrArgs&&... attr_args);
+  template <typename... AttrArgs>
+  Span start_span(std::string_view name, Id parent, Id cause,
+                  AttrArgs &&...attr_args);
 
   void end_span(Id trace_id, Id span_id);
 
   // Note: string_view overload for create_event might be useful too.
-  template<typename... AttrArgs>
-  void create_event(const StaticStringSource &name, Id parent, Id cause, AttrArgs&&... attr_args);
+  template <typename... AttrArgs>
+  void create_event(const StaticStringSource &name, Id parent, Id cause,
+                    AttrArgs &&...attr_args);
 
   // void create_event(std::string_view name, Id parent, Id cause,
   //                   std::initializer_list<Attribute> attrs);
@@ -251,38 +253,44 @@ struct AttrMaker {
     AttributeValue attr_val;
     attr_val.type = AttributeValue::Type::BOOL;
     attr_val.b = val;
-    return Attribute{Waffle::detail::g_tracer_instance->get_string_id(key), attr_val};
+    return Attribute{Waffle::detail::g_tracer_instance->get_string_id(key),
+                     attr_val};
   }
   inline Attribute operator=(int val) const {
     AttributeValue attr_val;
     attr_val.type = AttributeValue::Type::INT64;
     attr_val.i64 = static_cast<int64_t>(val);
-    return Attribute{Waffle::detail::g_tracer_instance->get_string_id(key), attr_val};
+    return Attribute{Waffle::detail::g_tracer_instance->get_string_id(key),
+                     attr_val};
   }
   inline Attribute operator=(long long val) const {
     AttributeValue attr_val;
     attr_val.type = AttributeValue::Type::INT64;
     attr_val.i64 = static_cast<int64_t>(val);
-    return Attribute{Waffle::detail::g_tracer_instance->get_string_id(key), attr_val};
+    return Attribute{Waffle::detail::g_tracer_instance->get_string_id(key),
+                     attr_val};
   }
   inline Attribute operator=(double val) const {
     AttributeValue attr_val;
     attr_val.type = AttributeValue::Type::DOUBLE;
     attr_val.f64 = val;
-    return Attribute{Waffle::detail::g_tracer_instance->get_string_id(key), attr_val};
+    return Attribute{Waffle::detail::g_tracer_instance->get_string_id(key),
+                     attr_val};
   }
   inline Attribute operator=(const char *val) const {
     AttributeValue attr_val;
     attr_val.type = AttributeValue::Type::STRING_ID;
     attr_val.string_id = Waffle::detail::g_tracer_instance->get_string_id(val);
-    return Attribute{Waffle::detail::g_tracer_instance->get_string_id(key), attr_val};
+    return Attribute{Waffle::detail::g_tracer_instance->get_string_id(key),
+                     attr_val};
   }
   // Consider adding an overload for std::string_view for completeness
   inline Attribute operator=(std::string_view val) const {
     AttributeValue attr_val;
     attr_val.type = AttributeValue::Type::STRING_ID;
     attr_val.string_id = Waffle::detail::g_tracer_instance->get_string_id(val);
-    return Attribute{Waffle::detail::g_tracer_instance->get_string_id(key), attr_val};
+    return Attribute{Waffle::detail::g_tracer_instance->get_string_id(key),
+                     attr_val};
   }
 };
 inline AttrMaker operator"" _w(const char *str, size_t) { return {str}; }
@@ -321,7 +329,7 @@ inline ParsedArgs parse_args_impl() { return {}; }
       name, sizeof(name) - 1);                                                 \
   Waffle::detail::g_tracer_instance->create_event(                             \
       CONCAT(waffle_event_loc_, __LINE__),                                     \
-      Waffle::context::get_current_span_id(),                                \
+      Waffle::context::get_current_span_id(),                                  \
       Waffle::detail::parse_args_impl(__VA_ARGS__).cause, __VA_ARGS__)
 
 #define CONCAT_IMPL(a, b) a##b
