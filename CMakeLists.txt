@@ -22,38 +22,31 @@ target_link_libraries(Waffle PRIVATE WaffleHelpers)
 # For C++20, the compile feature is 'cxx_std_20'.
 target_compile_features(Waffle PRIVATE cxx_std_20)
 
-# --- Testing with Catch2 ---
+# --- Testing Setup ---
 
-# Include FetchContent module to download dependencies
-include(FetchContent)
+# Add an option to enable/disable building of tests
+option(WAFFLE_BUILD_TESTS "Build Waffle unit tests" ON)
 
-# Declare Catch2 as a dependency
-# Using a specific tag is recommended for reproducibility.
-# As of early 2024, v3.5.2 is a recent stable tag for Catch2 v3.
-FetchContent_Declare(
-  Catch2
-  GIT_REPOSITORY https://github.com/catchorg/Catch2.git
-  GIT_TAG        v3.5.2 # You can update this to a newer stable Catch2 v3 tag
-)
+if(WAFFLE_BUILD_TESTS)
+  # Enable testing for the project (required for CTest)
+  # This should be called before add_subdirectory(tests) if tests/CMakeLists.txt uses CTest commands like catch_discover_tests.
+  enable_testing()
 
-# Make Catch2 available. This will download (if needed) and configure it.
-# The Catch2 targets (like Catch2::Catch2WithMain) will be available after this.
-FetchContent_MakeAvailable(Catch2)
+  # Add the tests subdirectory. CMake will look for a CMakeLists.txt file
+  # in the 'tests' directory and process it.
+  add_subdirectory(tests)
+else()
+  message(STATUS "Tests are disabled.")
+endif()
 
-# Enable testing for the project (required for CTest)
-enable_testing()
+# --- Benchmark Setup ---
+option(WAFFLE_BUILD_BENCHMARKS "Build Waffle microbenchmarks" OFF) # Default to OFF as they might take time
 
-# Add the test executable. We'll assume test sources are in a 'tests' subdirectory.
-add_executable(WaffleTests tests/waffle_tests.cpp)
-
-# Link the test executable against WaffleHelpers and Catch2::Catch2WithMain
-# This target from Catch2 provides the main() function for the test runner.
-target_link_libraries(WaffleTests PRIVATE WaffleHelpers Catch2::Catch2WithMain)
-
-# Set C++ standard for the test target as well
-target_compile_features(WaffleTests PRIVATE cxx_std_20)
-
-# Discover tests automatically using CTest and Catch2's test registration
-include(CTest)
-include(Catch)
-catch_discover_tests(WaffleTests)
+if(WAFFLE_BUILD_BENCHMARKS)
+  message(STATUS "Benchmarks are enabled.")
+  # Add the benchmarks subdirectory. CMake will look for a CMakeLists.txt file
+  # in the 'benchmarks' directory and process it.
+  add_subdirectory(benchmarks)
+else()
+  message(STATUS "Benchmarks are disabled.")
+endif()

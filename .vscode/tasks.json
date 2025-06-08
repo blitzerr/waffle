@@ -20,7 +20,7 @@
             "focus": false,
             "panel": "shared",
             "showReuseMessage": false,
-            "clear": true
+            "clear": true // Clear previous output from this task
         },
         "detail": "Configures the CMake project in a 'build' directory for Debug."
     },
@@ -36,7 +36,7 @@
             "kind": "build",
             "isDefault": true
         },
-        "problemMatcher": [],
+        "problemMatcher": ["$gcc"], // Helps VS Code parse compiler errors and warnings
         "dependsOn": [
             "CMake: Configure (Debug)"
         ],
@@ -46,7 +46,7 @@
             "focus": false,
             "panel": "shared",
             "showReuseMessage": false,
-            "clear": false
+            "clear": false // Do not clear output from the configure step
         },
         "detail": "Builds the project (Debug configuration)."
     },
@@ -72,9 +72,106 @@
             "focus": true,
             "panel": "shared",
             "showReuseMessage": false,
-            "clear": false
+            "clear": false // Do not clear output from the build step
         },
         "detail": "Runs CTest discovered tests from the Debug build."
+    },
+    {
+        "label": "CMake: Configure (Release for Benchmarks)",
+        "type": "shell",
+        "command": "cmake",
+        "args": [
+            "-S",
+            ".",
+            "-B",
+            "build_release", // Separate build directory for Release
+            "-DCMAKE_BUILD_TYPE=Release",
+            "-DWAFFLE_BUILD_BENCHMARKS=ON", // Ensure benchmarks are enabled
+            "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"
+        ],
+        "group": "build",
+        "presentation": {
+            "echo": true,
+            "reveal": "silent",
+            "focus": false,
+            "panel": "shared",
+            "showReuseMessage": false,
+            "clear": true
+        },
+        "detail": "Configures the CMake project in 'build_release' for Release with benchmarks."
+    },
+    {
+        "label": "CMake: Build (Release for Benchmarks)",
+        "type": "shell",
+        "command": "cmake",
+        "args": [
+            "--build",
+            "build_release",
+            "--target", // Optionally specify the benchmark target to build only that
+            "WaffleBenchmarks" // Assumes your benchmark executable is WaffleBenchmarks
+        ],
+        "group": "build",
+        "problemMatcher": ["$gcc"],
+        "dependsOn": [
+            "CMake: Configure (Release for Benchmarks)"
+        ],
+        "presentation": {
+            "echo": true,
+            "revealOnError": "always",
+            "focus": false,
+            "panel": "shared",
+            "showReuseMessage": false,
+            "clear": false
+        },
+        "detail": "Builds the project (Release configuration for benchmarks)."
+    },
+    {
+        "label": "CMake: Run Benchmarks (Release)",
+        "type": "shell",
+        // The command assumes your build directory is 'build_release'
+        // and CMake places the benchmark executable in 'build_release/benchmarks/'
+        "command": "./build_release/benchmarks/WaffleBenchmarks",
+        "args": [
+            // You can add default benchmark arguments here, e.g.:
+            // "--benchmark_format=console"
+        ],
+        "group": {
+            "kind": "test", // You can group benchmarks under 'test' or create a custom group
+            "isDefault": false // Not making this the default test task
+        },
+        "dependsOn": ["CMake: Build (Release for Benchmarks)"],
+        "presentation": {
+            "echo": true,
+            "reveal": "always",
+            "focus": true,
+            "panel": "dedicated", // Use a dedicated panel for benchmark output
+            "showReuseMessage": false,
+            "clear": true
+        },
+        "detail": "Runs WaffleBenchmarks from the Release build."
+    },
+    {
+        "label": "CMake: Clean Workspace",
+        "type": "shell",
+        "command": "rm", // Use 'rd /s /q' or 'del /s /q /f' on Windows if needed
+        "args": [
+            "-rf",
+            "${workspaceFolder}/build",
+            "${workspaceFolder}/build_release"
+            // You can add other directories to clean here if needed
+            // e.g., "${workspaceFolder}/.cache" if you have one
+        ],
+        "group": "build", // Or a custom "cleanup" group
+        "presentation": {
+            "echo": true,
+            "reveal": "always",
+            "focus": false,
+            "panel": "shared",
+            "showReuseMessage": false,
+            "clear": true
+        },
+        "problemMatcher": [],
+        "detail": "Removes the 'build' and 'build_release' directories to clean the workspace."
     }
 ]
 }
