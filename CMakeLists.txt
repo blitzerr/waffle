@@ -7,9 +7,15 @@ project(Waffle VERSION 1.0 LANGUAGES CXX)
 # Disable compiler-specific extensions (e.g., GNU extensions) for stricter C++ standard compliance.
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# Add the subdirectory for helper data structures.
+# This will look for a CMakeLists.txt in the 'helpers' directory
+# and process it, defining the WaffleHelpers library target.
+add_subdirectory(helpers)
+
 # Add the executable
 add_executable(Waffle main.cpp)
 
+target_link_libraries(Waffle PRIVATE WaffleHelpers)
 # Set C++ standard requirements for the MyProject target using compile features.
 # This is the modern, preferred, and more granular way compared to setting CMAKE_CXX_STANDARD globally.
 # 'PRIVATE' indicates these features are required for compiling MyProject itself.
@@ -40,9 +46,9 @@ enable_testing()
 # Add the test executable. We'll assume test sources are in a 'tests' subdirectory.
 add_executable(WaffleTests tests/waffle_tests.cpp)
 
-# Link the test executable against Catch2::Catch2WithMain
+# Link the test executable against WaffleHelpers and Catch2::Catch2WithMain
 # This target from Catch2 provides the main() function for the test runner.
-target_link_libraries(WaffleTests PRIVATE Catch2::Catch2WithMain)
+target_link_libraries(WaffleTests PRIVATE WaffleHelpers Catch2::Catch2WithMain)
 
 # Set C++ standard for the test target as well
 target_compile_features(WaffleTests PRIVATE cxx_std_20)

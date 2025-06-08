@@ -1,0 +1,80 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+        "label": "CMake: Configure (Debug)",
+        "type": "shell",
+        "command": "cmake",
+        "args": [
+            "-S",
+            ".",
+            "-B",
+            "build",
+            "-DCMAKE_BUILD_TYPE=Debug",
+            "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"
+        ],
+        "group": "build",
+        "presentation": {
+            "echo": true,
+            "reveal": "silent",
+            "focus": false,
+            "panel": "shared",
+            "showReuseMessage": false,
+            "clear": true
+        },
+        "detail": "Configures the CMake project in a 'build' directory for Debug."
+    },
+    {
+        "label": "CMake: Build (Debug)",
+        "type": "shell",
+        "command": "cmake",
+        "args": [
+            "--build",
+            "build"
+        ],
+        "group": {
+            "kind": "build",
+            "isDefault": true
+        },
+        "problemMatcher": [],
+        "dependsOn": [
+            "CMake: Configure (Debug)"
+        ],
+        "presentation": {
+            "echo": true,
+            "revealOnError": "always",
+            "focus": false,
+            "panel": "shared",
+            "showReuseMessage": false,
+            "clear": false
+        },
+        "detail": "Builds the project (Debug configuration)."
+    },
+    {
+        "label": "CMake: Run Tests (Debug)",
+        "type": "shell",
+        "command": "ctest",
+        "args": [
+            "--test-dir",
+            "build",
+            "--output-on-failure"
+        ],
+        "group": {
+            "kind": "test",
+            "isDefault": true
+        },
+        "dependsOn": [
+            "CMake: Build (Debug)"
+        ],
+        "presentation": {
+            "echo": true,
+            "reveal": "always",
+            "focus": true,
+            "panel": "shared",
+            "showReuseMessage": false,
+            "clear": false
+        },
+        "detail": "Runs CTest discovered tests from the Debug build."
+    }
+]
+}
