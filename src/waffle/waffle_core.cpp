@@ -202,77 +202,6 @@ uint64_t Tracer::get_string_id(std::string_view s) {
   return hash;
 }
 
-// Helper to collect attributes from variadic arguments
-template <typename... AttrArgs>
-void collect_attributes_into_array(
-    std::array<Attribute, MAX_ATTRIBUTES_PER_TRACELET> &collected_attrs,
-    uint8_t &attr_count, AttrArgs &&...attr_args) {
-  attr_count = 0;
-  // Use a C++17 fold expression to process each argument
-  auto process_one_arg = [&](const auto &arg) {
-    // Check if arg is convertible to Attribute.
-    // This handles Attribute objects created by `key = value` syntax.
-    if constexpr (std::is_convertible_v<const decltype(arg) &, Attribute>) {
-      if (attr_count < MAX_ATTRIBUTES_PER_TRACELET) {
-        collected_attrs[attr_count++] = arg;
-      } else {
-        // Optional: Log warning about too many attributes for this span/event
-      }
-    } else if constexpr (std::is_same_v<std::decay_t<decltype(arg)>,
-                                        CausedBy>) {
-      // CausedBy is handled separately and extracted by parse_args_impl.
-      // If it appears here, it's redundant or a usage error. Ignore for
-      // attribute collection.
-    }
-    // Other types are ignored.
-  };
-  (process_one_arg(attr_args), ...);
-}
-
-template <typename... AttrArgs>
-Span Tracer::start_span(const StaticStringSource &name, Id parent, Id cause,
-                        AttrArgs &&...attr_args) {
-  uint64_t new_id_val = _next_id.fetch_add(1, std::memory_order_relaxed);
-  Id new_id = {new_id_val};
-  // TODO: Critical: If parent.value is a valid span_id, trace_id should be the
-  // parent's trace_id, not parent.value itself (unless parent is the root
-  // span). This requires a way to get the parent's trace_id, e.g., via
-  // Waffle::context. Keeping original logic for now to focus on the try_emplace
-  // fix.
-  Id trace_id =
-      (parent.value != kInvalidId.value) ? Id{parent.value} : Id{new_id_val};
-
-  std::array<Attribute, MAX_ATTRIBUTES_PER_TRACELET> collected_attrs_array{};
-  uint8_t actual_attr_count = 0;
-  collect_attributes_into_array(collected_attrs_array, actual_attr_count,
-                                std::forward<AttrArgs>(attr_args)...);
-
-  _queue->try_emplace(get_timestamp(), trace_id, new_id, parent, cause,
-                      get_string_id(name), Tracelet::RecordType::SPAN_START,
-                      collected_attrs_array, actual_attr_count);
-  return Span(this, trace_id, new_id, parent);
-}
-
-template <typename... AttrArgs>
-Span Tracer::start_span(std::string_view name, Id parent, Id cause,
-                        AttrArgs &&...attr_args) {
-  uint64_t new_id_val = _next_id.fetch_add(1, std::memory_order_relaxed);
-  Id new_id = {new_id_val};
-  // TODO: Same trace_id logic concern as above.
-  Id trace_id =
-      (parent.value != kInvalidId.value) ? Id{parent.value} : Id{new_id_val};
-
-  std::array<Attribute, MAX_ATTRIBUTES_PER_TRACELET> collected_attrs_array{};
-  uint8_t actual_attr_count = 0;
-  collect_attributes_into_array(collected_attrs_array, actual_attr_count,
-                                std::forward<AttrArgs>(attr_args)...);
-
-  _queue->try_emplace(get_timestamp(), trace_id, new_id, parent, cause,
-                      get_string_id(name), Tracelet::RecordType::SPAN_START,
-                      collected_attrs_array, actual_attr_count);
-  return Span(this, trace_id, new_id, parent);
-}
-
 void Tracer::end_span(Id trace_id, Id span_id) {
   // For SPAN_END, parent_span_id in Tracelet context usually refers to the span
   // that just ended, and its "parent" for context restoration is its original
@@ -282,25 +211,6 @@ void Tracer::end_span(Id trace_id, Id span_id) {
   // name in the same way.
   _queue->try_emplace(get_timestamp(), trace_id, span_id, kInvalidId,
                       kInvalidId, 0, Tracelet::RecordType::SPAN_END);
-}
-
-template <typename... AttrArgs>
-void Tracer::create_event(const StaticStringSource &name, Id parent, Id cause,
-                          AttrArgs &&...attr_args) {
-  Id event_id = {_next_id.fetch_add(1)};
-  // TODO: trace_id logic for events needs careful review. If parent is a
-  // span_id, trace_id should be that span's trace_id.
-  Id trace_id =
-      (parent.value != kInvalidId.value) ? Id{parent.value} : event_id;
-
-  std::array<Attribute, MAX_ATTRIBUTES_PER_TRACELET> collected_attrs_array{};
-  uint8_t actual_attr_count = 0;
-  collect_attributes_into_array(collected_attrs_array, actual_attr_count,
-                                std::forward<AttrArgs>(attr_args)...);
-
-  _queue->try_emplace(get_timestamp(), trace_id, event_id, parent, cause,
-                      get_string_id(name), Tracelet::RecordType::EVENT,
-                      collected_attrs_array, actual_attr_count);
 }
 
 // --- Global Setup & Context ---

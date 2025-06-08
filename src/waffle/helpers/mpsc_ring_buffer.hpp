@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <new> // For placement new, ::operator new, ::operator delete
 #include <stdexcept>
 
 // Helper to determine cache line size
@@ -13,7 +14,7 @@ constexpr size_t CACHE_LINE_SIZE = 64;
 
 // Helper to round up to the next power of two
 inline size_t next_power_of_two(size_t n) {
-  if (n == 0)
+  if (n == 0 || n == 1)
     return 2;
   size_t p = 1;
   while (p < n) {
@@ -30,10 +31,24 @@ public:
     }
     _capacity = next_power_of_two(capacity);
     _mask = _capacity - 1;
-    _buffer = new T[_capacity];
+    // Allocate raw memory, does not call any T constructors
+    _buffer = static_cast<T *>(::operator new(_capacity * sizeof(T)));
   }
 
-  ~MpscRingBuffer() { delete[] _buffer; }
+  ~MpscRingBuffer() {
+    // Manually destruct any remaining elements in the buffer
+    // This is crucial because we used placement new for construction
+    // and are using raw memory.
+    size_t current_head = _head.load(std::memory_order_relaxed);
+    const size_t current_tail = _tail.load(std::memory_order_relaxed);
+
+    for (size_t i = current_head; i != current_tail; ++i) {
+      _buffer[i & _mask].~T();
+    }
+
+    // Deallocate the raw memory
+    ::operator delete(_buffer);
+  }
 
   MpscRingBuffer(const MpscRingBuffer &) = delete;
   MpscRingBuffer &operator=(const MpscRingBuffer &) = delete;

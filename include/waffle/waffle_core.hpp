@@ -6,102 +6,18 @@
 #include <string>
 #include <string_view>
 #include <thread>
-#include <type_traits>
 #include <unordered_map>
 
+#include "waffle_core_detail.hpp" // Provides detail::extract_attributes, detail::parse_args_impl. Depends on types from waffle_common_types.hpp.
 #include <waffle/helpers/mpsc_ring_buffer.hpp>
 
 namespace Waffle {
 
-// --- Core Public API Types ---
-
-/**
- * @brief A unified, strongly-typed identifier for all trace entities (traces,
- * spans, events).
- */
-struct Id {
-  uint64_t value = 0;
-  bool operator==(const Id &) const = default;
-};
-constexpr Id kInvalidId{0};
-
-/**
- * @brief A tag struct used to establish an explicit causal link between trace
- * entities. This is distinct from the implicit parent/child nesting
- * relationship. It should be used when you want to create an "arrow" from a
- * separate, preceding operation to the start of a new one. This is optional and
- * should be used only when needed.
- *
- * Example: WAFFLE_SPAN("process_data", CausedBy(data_loader_id), ...);
- */
-struct CausedBy {
-  explicit constexpr CausedBy(Id id) : value(id) {}
-  Id value;
-};
-
 // --- Forward Declarations ---
-class Tracer;
-class Span;
+// Forward declarations for Tracer and Span are now provided by
+// waffle_common_types.hpp class Tracer; // No longer needed here class Span; //
+// No longer needed here
 
-// --- Structured Attribute Handling ---
-struct AttributeValue {
-  enum class Type : uint8_t { BOOL, INT64, DOUBLE, STRING_ID };
-  Type type;
-  union {
-    bool b;
-    int64_t i64;
-    double f64;
-    uint64_t string_id;
-  };
-
-  // Default constructor
-  AttributeValue() : type(Type::BOOL), b(false) {}
-};
-
-struct Attribute {
-  uint64_t key_id;
-  AttributeValue value;
-
-  // Default constructor
-  Attribute() : key_id(0), value() {}
-
-  // Constructor for direct initialization from key_id and AttributeValue
-  Attribute(uint64_t k, AttributeValue v) : key_id(k), value(std::move(v)) {}
-};
-
-// --- Compile-Time Hashing & Static String Registration ---
-
-/**
- * @brief A constexpr implementation of the FNV-1a hash algorithm.
- * This allows hashing string literals at compile time for maximum performance.
- */
-constexpr uint64_t fnv1a_hash(const char *str, size_t n) {
-  uint64_t hash = 0xcbf29ce484222325;
-  for (size_t i = 0; i < n; ++i) {
-    hash ^= static_cast<uint64_t>(str[i]);
-    hash *= 0x100000001b3;
-  }
-  return hash;
-}
-
-/**
- * @brief A source location for a static string, containing the string and its
- * compile-time hash. A static instance of this struct is created for every
- * string literal used in tracing macros.
- */
-struct StaticStringSource {
-  uint64_t hash;
-  const char *str;
-  StaticStringSource(const char *s, size_t n)
-      : hash(fnv1a_hash(s, n)), str(s) {}
-};
-
-// --- Core Data Structures ---
-// The number of attributes is chosen carefully to make the total Tracelet size
-// a multiple of the cache line size (64 bytes) to avoid performance degradation
-// from a single Tracelet spanning multiple cache lines.
-// With 6 attributes, the total size is exactly 192 bytes (3 * 64).
-constexpr size_t MAX_ATTRIBUTES_PER_TRACELET = 6;
 struct alignas(CACHE_LINE_SIZE) Tracelet {
   enum class RecordType : uint8_t { SPAN_START, SPAN_END, EVENT };
 
@@ -181,20 +97,7 @@ public:
   Tracer();
   ~Tracer();
 
-  template <typename... AttrArgs>
-  Span start_span(const StaticStringSource &name, Id parent, Id cause,
-                  AttrArgs &&...attr_args);
-
-  template <typename... AttrArgs>
-  Span start_span(std::string_view name, Id parent, Id cause,
-                  AttrArgs &&...attr_args);
-
   void end_span(Id trace_id, Id span_id);
-
-  // Note: string_view overload for create_event might be useful too.
-  template <typename... AttrArgs>
-  void create_event(const StaticStringSource &name, Id parent, Id cause,
-                    AttrArgs &&...attr_args);
 
   // void create_event(std::string_view name, Id parent, Id cause,
   //                   std::initializer_list<Attribute> attrs);
@@ -203,6 +106,91 @@ public:
   uint64_t get_string_id(std::string_view s);
 
   void shutdown();
+
+  // --- Template method definitions moved here from .cpp file ---
+
+  template <typename... AttrArgs>
+  Span start_span(const StaticStringSource &name, Id parent_span_id,
+                  Id cause_id, AttrArgs &&...attr_args) {
+    uint64_t new_id_val = _next_id.fetch_add(1, std::memory_order_relaxed);
+    Id new_span_id = {new_id_val};
+
+    // TODO: Critical: Trace ID Propagation.
+    // If parent_span_id is valid, trace_id should be the parent's trace_id.
+    // If parent_span_id is kInvalidId, this is a root span, and its new_span_id
+    // becomes the trace_id. The current logic `(parent_span_id.value !=
+    // kInvalidId.value) ? Id{parent_span_id.value} : new_span_id` incorrectly
+    // uses parent_span_id as trace_id for child spans. This requires a robust
+    // way to access the parent's trace_id, possibly by enhancing
+    // Waffle::context to store and retrieve the current trace_id alongside the
+    // span_id.
+    Id trace_id_for_new_span = (parent_span_id.value != kInvalidId.value)
+                                   ? Id{parent_span_id.value}
+                                   : new_span_id; // Needs fix
+
+    auto [attributes_array, actual_attr_count] =
+        Waffle::detail::extract_attributes(
+            std::forward<AttrArgs>(attr_args)...);
+
+    if (!_shutdown_flag) {
+      register_static_string(name.hash, name.str); // Ensure string is known
+      _queue->try_emplace(get_timestamp(), trace_id_for_new_span, new_span_id,
+                          parent_span_id, cause_id, name.hash,
+                          Tracelet::RecordType::SPAN_START, attributes_array,
+                          actual_attr_count);
+    }
+    return Span(this, trace_id_for_new_span, new_span_id, parent_span_id);
+  }
+
+  template <typename... AttrArgs>
+  Span start_span(std::string_view name, Id parent_span_id, Id cause_id,
+                  AttrArgs &&...attr_args) {
+    uint64_t new_id_val = _next_id.fetch_add(1, std::memory_order_relaxed);
+    Id new_span_id = {new_id_val};
+    // TODO: Same critical trace_id propagation issue as above.
+    Id trace_id_for_new_span = (parent_span_id.value != kInvalidId.value)
+                                   ? Id{parent_span_id.value}
+                                   : new_span_id; // Needs fix
+
+    auto [attributes_array, actual_attr_count] =
+        Waffle::detail::extract_attributes(
+            std::forward<AttrArgs>(attr_args)...);
+
+    uint64_t name_hash = get_string_id(name); // Interns the string_view
+    if (!_shutdown_flag) {
+      _queue->try_emplace(get_timestamp(), trace_id_for_new_span, new_span_id,
+                          parent_span_id, cause_id, name_hash,
+                          Tracelet::RecordType::SPAN_START, attributes_array,
+                          actual_attr_count);
+    }
+    return Span(this, trace_id_for_new_span, new_span_id, parent_span_id);
+  }
+
+  template <typename... AttrArgs>
+  void create_event(const StaticStringSource &name, Id parent_span_id,
+                    Id cause_id, AttrArgs &&...attr_args) {
+    // TODO: Trace ID for events should be derived from the parent_span_id's
+    // trace. Similar to start_span, this needs a way to get the parent's
+    // trace_id. If parent_span_id is kInvalidId, it's an orphaned event,
+    // trace_id might be new or invalid.
+    Id trace_id_for_event = (parent_span_id.value != kInvalidId.value)
+                                ? Id{parent_span_id.value}
+                                : kInvalidId; // Needs fix
+    Id event_id = {_next_id.fetch_add(
+        1)}; // Events could have their own IDs or use parent_span_id
+             // contextually. Using parent_span_id as the "span_id" for the
+             // Tracelet.
+    auto [attributes_array, actual_attr_count] =
+        Waffle::detail::extract_attributes(
+            std::forward<AttrArgs>(attr_args)...);
+    if (!_shutdown_flag) {
+      register_static_string(name.hash, name.str); // Ensure string is known
+      _queue->try_emplace(get_timestamp(), trace_id_for_event, parent_span_id,
+                          parent_span_id, cause_id, name.hash,
+                          Tracelet::RecordType::EVENT, attributes_array,
+                          actual_attr_count);
+    }
+  }
 
 private:
   friend class Span;
@@ -295,44 +283,4 @@ struct AttrMaker {
 };
 inline AttrMaker operator"" _w(const char *str, size_t) { return {str}; }
 } // namespace literals
-
-// --- Argument Parsing and Macro Implementation ---
-namespace detail {
-// A helper struct to parse the optional CausedBy tag from variadic arguments.
-struct ParsedArgs {
-  Id cause{kInvalidId};
-};
-
-template <typename T, typename... Args>
-ParsedArgs parse_args_impl(const T &first, const Args &...rest) {
-  if constexpr (std::is_same_v<T, CausedBy>) {
-    return {first.value};
-  } else {
-    return parse_args_impl(rest...);
-  }
-}
-
-inline ParsedArgs parse_args_impl() { return {}; }
-} // namespace detail
-
-#define WAFFLE_SPAN(name, ...)                                                 \
-  static const Waffle::StaticStringSource CONCAT(waffle_span_loc_, __LINE__)(  \
-      name, sizeof(name) - 1);                                                 \
-  auto CONCAT(waffle_span_, __LINE__) =                                        \
-      Waffle::detail::g_tracer_instance -> start_span(                         \
-          CONCAT(waffle_span_loc_, __LINE__),                                  \
-          Waffle::context::get_current_span_id(),                              \
-          Waffle::detail::parse_args_impl(__VA_ARGS__).cause, __VA_ARGS__)
-
-#define WAFFLE_EVENT(name, ...)                                                \
-  static const Waffle::StaticStringSource CONCAT(waffle_event_loc_, __LINE__)( \
-      name, sizeof(name) - 1);                                                 \
-  Waffle::detail::g_tracer_instance->create_event(                             \
-      CONCAT(waffle_event_loc_, __LINE__),                                     \
-      Waffle::context::get_current_span_id(),                                  \
-      Waffle::detail::parse_args_impl(__VA_ARGS__).cause, __VA_ARGS__)
-
-#define CONCAT_IMPL(a, b) a##b
-#define CONCAT(a, b) CONCAT_IMPL(a, b)
-
 } // namespace Waffle
