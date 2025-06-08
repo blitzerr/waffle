@@ -1,26 +1,43 @@
 cmake_minimum_required(VERSION 3.20) # Using a recent, existing CMake version for C++20 support
 
 # Set the project name
-# It's good practice to specify the languages used by your project.
 project(Waffle VERSION 1.0 LANGUAGES CXX)
 
 # Disable compiler-specific extensions (e.g., GNU extensions) for stricter C++ standard compliance.
 set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_CXX_STANDARD 20) # Set default C++ standard
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Add the subdirectory for helper data structures.
-# This will look for a CMakeLists.txt in the 'helpers' directory
-# and process it, defining the WaffleHelpers library target.
-add_subdirectory(helpers)
+# --- WaffleHelpers (Internal Library) ---
+# This subdirectory defines the WaffleHelpers INTERFACE library,
+# which includes components like mpsc_ring_buffer.hpp.
+# Its include path will be src/.
+add_subdirectory(src)
 
-# Add the executable
-add_executable(Waffle main.cpp)
+# --- Waffle (Public Library) ---
+# This is the main public library target.
+# It will compile sources from the src/ directory.
+add_library(Waffle STATIC) # Or SHARED if you prefer
 
-target_link_libraries(Waffle PRIVATE WaffleHelpers)
-# Set C++ standard requirements for the MyProject target using compile features.
-# This is the modern, preferred, and more granular way compared to setting CMAKE_CXX_STANDARD globally.
-# 'PRIVATE' indicates these features are required for compiling MyProject itself.
-# For C++20, the compile feature is 'cxx_std_20'.
-target_compile_features(Waffle PRIVATE cxx_std_20)
+# Add source files for the Waffle library.
+# Paths are relative to this CMakeLists.txt (CMAKE_CURRENT_SOURCE_DIR).
+target_sources(Waffle PRIVATE
+    src/waffle/waffle_core.cpp
+    # Add any other .cpp files from src/ that belong to the Waffle library here
+)
+
+# Public include directory for the Waffle library.
+# Users will include headers from here (e.g., <waffle/tracer.hpp>).
+# PUBLIC makes these includes available to Waffle's own sources and to consumers.
+target_include_directories(Waffle PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include> # For installation
+)
+
+# The public Waffle library (waffle_core.hpp) uses WaffleHelpers.
+# PUBLIC ensures Waffle's sources can find WaffleHelpers headers,
+# and consumers of Waffle also get WaffleHelpers' include directories if needed.
+target_link_libraries(Waffle PUBLIC WaffleHelpers)
 
 # --- Testing Setup ---
 
@@ -35,6 +52,9 @@ if(WAFFLE_BUILD_TESTS)
   # Add the tests subdirectory. CMake will look for a CMakeLists.txt file
   # in the 'tests' directory and process it.
   add_subdirectory(tests)
+  # Example: If tests link against the public Waffle library
+  # And also need WaffleHelpers for internal testing
+  # test targets would link to Waffle and/or WaffleHelpers as needed.
 else()
   message(STATUS "Tests are disabled.")
 endif()
@@ -47,6 +67,11 @@ if(WAFFLE_BUILD_BENCHMARKS)
   # Add the benchmarks subdirectory. CMake will look for a CMakeLists.txt file
   # in the 'benchmarks' directory and process it.
   add_subdirectory(benchmarks)
+  # Benchmarks link against WaffleHelpers, which is correct.
 else()
   message(STATUS "Benchmarks are disabled.")
 endif()
+
+# --- Examples Setup ---
+# Examples should demonstrate usage of the public Waffle library.
+add_subdirectory(examples)
