@@ -19,6 +19,15 @@ add_subdirectory(src)
 # It will compile sources from the src/ directory.
 add_library(Waffle STATIC) # Or SHARED if you prefer
 
+# Example: add_library(Waffle ...)
+
+if(TARGET Waffle AND BUILD_COVERAGE AND COVERAGE_COMPILE_FLAGS)
+  target_compile_options(Waffle PRIVATE ${COVERAGE_COMPILE_FLAGS})
+  target_link_options(Waffle PRIVATE ${COVERAGE_LINK_FLAGS}) # Requires CMake 3.13+
+  # For older CMake, you might try adding to target_link_libraries or CMAKE_CXX_FLAGS/CMAKE_EXE_LINKER_FLAGS
+endif()
+
+
 # Add source files for the Waffle library.
 # Paths are relative to this CMakeLists.txt (CMAKE_CURRENT_SOURCE_DIR).
 target_sources(Waffle PRIVATE
@@ -38,6 +47,23 @@ target_include_directories(Waffle PUBLIC
 # PUBLIC ensures Waffle's sources can find WaffleHelpers headers,
 # and consumers of Waffle also get WaffleHelpers' include directories if needed.
 target_link_libraries(Waffle PUBLIC WaffleHelpers)
+
+# Option to enable code coverage
+option(BUILD_COVERAGE "Enable code coverage support (for GCC/gcov)" OFF)
+
+set(COVERAGE_COMPILE_FLAGS "")
+set(COVERAGE_LINK_FLAGS "")
+
+if(BUILD_COVERAGE)
+  if(CMAKE_CXX_COMPILER_ID MATCHES "GNU")
+    message(STATUS "Code coverage flags enabled for GCC.")
+    # For GCC, --coverage enables gcov support (-fprofile-arcs -ftest-coverage)
+    set(COVERAGE_COMPILE_FLAGS "--coverage")
+    set(COVERAGE_LINK_FLAGS "--coverage")
+  else()
+    message(WARNING "BUILD_COVERAGE is ON, but the current C++ compiler (${CMAKE_CXX_COMPILER_ID}) is not GNU GCC. gcov coverage will not be enabled.")
+  endif()
+endif()
 
 # --- Testing Setup ---
 

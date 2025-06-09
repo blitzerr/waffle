@@ -1,0 +1,52 @@
+{
+  "name": "Waffle C++ Dev Container (Ubuntu)",
+  // Using a Microsoft-provided C++ dev container image.
+  // This image comes with GCC, G++, CMake, Git, GDB, and other common C++ dev tools.
+  // "1-ubuntu-22.04" specifies version 1 of the image definition based on Ubuntu 22.04.
+  "image": "mcr.microsoft.com/devcontainers/cpp:1-ubuntu-24.04",
+
+  // "features": {
+  //   // This feature ensures lcov is installed in the container.
+  //   // gcov is typically part of the GCC installation, which is in the base image.
+  //    "ghcr.io/devcontainers/features/lcov:latest": {} 
+  // },
+
+  "customizations": {
+    "vscode": {
+      "settings": {
+        // Tell the C/C++ extension where to find the compile commands database
+        // for accurate IntelliSense. This assumes your debug build is in 'build'.
+        // Adjust if you primarily use another build folder like 'build-coverage'.
+        "C_Cpp.default.compileCommands": "${containerWorkspaceFolder}/build/compile_commands.json",
+
+        // Optional: If you want CMake Tools to default to GCC for all configurations
+        // "cmake.configureSettings": {
+        //   "CMAKE_C_COMPILER": "gcc",
+        //   "CMAKE_CXX_COMPILER": "g++"
+        // },
+
+        // Ensure terminal uses bash for consistency if needed
+        "terminal.integrated.defaultProfile.linux": "bash"
+      },
+      "extensions": [
+        "ms-vscode.cpptools-extension-pack", // Includes C/C++ IntelliSense, debugger, etc.
+        "ms-vscode.cmake-tools",             // For CMake integration
+        "ms-azuretools.vscode-docker",       // Helpful for managing Docker and dev containers
+        "mhutchie.git-graph"                 // Useful for visualizing Git history
+        // Add any other extensions you prefer
+      ]
+    }
+  },
+
+  // This command runs after the container is created.
+  // It's a common fix for Git repository ownership issues within the container.
+  "postCreateCommand": "git config --global --add safe.directory ${containerWorkspaceFolder} && sudo apt-get update && sudo apt-get install -y lcov",
+
+  // Run as the non-root 'vscode' user (common in dev container images)
+  "remoteUser": "vscode"
+
+  // If you needed more complex package installations or setup, you could use a Dockerfile:
+  // "build": {
+  //  "dockerfile": "Dockerfile"
+  // }
+}

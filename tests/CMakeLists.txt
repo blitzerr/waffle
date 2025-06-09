@@ -32,3 +32,9 @@ target_compile_features(WaffleTests PRIVATE cxx_std_20)
 # Discover tests automatically using CTest and Catch2's test registration
 include(Catch) # Provides catch_discover_tests
 catch_discover_tests(WaffleTests)
+
+# Apply coverage flags if enabled (flags are defined in the root CMakeLists.txt)
+if(BUILD_COVERAGE AND COVERAGE_COMPILE_FLAGS AND TARGET WaffleTests)
+  target_compile_options(WaffleTests PRIVATE ${COVERAGE_COMPILE_FLAGS})
+  target_link_options(WaffleTests PRIVATE ${COVERAGE_LINK_FLAGS}) # Requires CMake 3.13+
+endif()

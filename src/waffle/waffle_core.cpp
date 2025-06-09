@@ -3,6 +3,7 @@
 #include <iostream>
 #include <map>
 #include <utility>
+#include <vector>
 
 namespace Waffle {
 

@@ -32,5 +32,13 @@
 *.app
 
 build*/
-.cache/
+.cache/*
 
+# Code Coverage files
+*.gcno
+*.gcda
+*.gcov
+coverage.info
+coverage.info.cleaned
+coverage_report_lcov/
+lcov_report/

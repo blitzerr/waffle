@@ -16,7 +16,7 @@
         "group": "build",
         "presentation": {
             "echo": true,
-            "reveal": "silent",
+            "reveal": "always", // Make configuration output visible
             "focus": false,
             "panel": "shared",
             "showReuseMessage": false,
@@ -157,6 +157,7 @@
         "args": [
             "-rf",
             "${workspaceFolder}/build",
+            "${workspaceFolder}/build-coverage",
             "${workspaceFolder}/build_release"
             // You can add other directories to clean here if needed
             // e.g., "${workspaceFolder}/.cache" if you have one
@@ -172,6 +173,112 @@
         },
         "problemMatcher": [],
         "detail": "Removes the 'build' and 'build_release' directories to clean the workspace."
+    },
+    {
+        "label": "CMake: Configure Coverage (GCC)",
+        "type": "shell",
+        "command": "cmake",
+        "args": [
+            "-S",
+            "${workspaceFolder}",
+            "-B",
+            "${workspaceFolder}/build-coverage", // Separate build directory for coverage
+            "-DBUILD_COVERAGE=ON",
+            "-DCMAKE_BUILD_TYPE=Debug", // Coverage is best with Debug builds
+            "-DCMAKE_C_COMPILER=gcc",   // Explicitly use GCC
+            "-DCMAKE_CXX_COMPILER=g++"  // Explicitly use G++
+        ],
+        "group": "build",
+        "presentation": {
+            "echo": true,
+            "reveal": "silent",
+            "focus": false,
+            "panel": "shared",
+            "showReuseMessage": false,
+            "clear": true
+        },
+        "problemMatcher": []
+    },
+    {
+        "label": "CMake: Build for Coverage",
+        "type": "shell",
+        "command": "cmake",
+        "args": [
+            "--build",
+            "${workspaceFolder}/build-coverage"
+        ],
+        "group": "build",
+        "dependsOn": ["CMake: Configure Coverage (GCC)"],
+        "problemMatcher": ["$gcc"]
+    },
+    {
+        "label": "Coverage: Clean Old Data",
+        "type": "shell",
+        "command": "lcov",
+        "args": [
+            "--zerocounters",
+            "--directory",
+            "${workspaceFolder}/build-coverage" // Target the coverage build directory
+        ],
+        "problemMatcher": []
+    },
+    {
+        "label": "Coverage: Run Tests",
+        "type": "shell",
+        "command": "ctest", // Use ctest to run tests
+        "args": [
+            "--test-dir",
+            "${workspaceFolder}/build-coverage", // Specify the build directory for coverage
+            "--output-on-failure"
+        ],
+        "options": {
+            "cwd": "${workspaceFolder}/build-coverage" // Ensure ctest runs in the correct directory
+        },
+        "dependsOn": ["CMake: Build for Coverage"],
+        "problemMatcher": []
+    },
+    {
+        "label": "Coverage: Generate LCOV Report",
+        "type": "shell",
+        "command": "lcov",
+        "args": [
+            "--capture",
+            "--directory",
+            "${workspaceFolder}/build-coverage", // Source of .gcno and .gcda files
+            "--output-file",
+            "${workspaceFolder}/build-coverage/coverage.info", // Output .info file
+            "--rc", "branch_coverage=1" // Enable branch coverage
+        ],
+        "dependsOn": ["Coverage: Run Tests"],
+        "problemMatcher": []
+    },
+    {
+        "label": "Coverage: Generate HTML Report",
+        "type": "shell",
+        "command": "genhtml",
+        "args": [
+            "${workspaceFolder}/build-coverage/coverage.info", // Input .info file
+            "--output-directory",
+            "${workspaceFolder}/build-coverage/coverage_report_lcov", // Output HTML directory
+            "--branch-coverage", // Include branch coverage data in HTML
+            "--legend"           // Show legend in HTML report
+        ],
+        "dependsOn": ["Coverage: Generate LCOV Report"],
+        "problemMatcher": []
+    },
+    {
+        "label": "Coverage: Full Analysis (GCC)",
+        "dependsOrder": "sequence",
+        "dependsOn": [
+            "CMake: Configure Coverage (GCC)", // Ensure this runs first to create the directory
+            "Coverage: Clean Old Data",        // Now it's safe to clean counters
+            "CMake: Build for Coverage",       // Configure step here will be a no-op if already done
+            "Coverage: Run Tests",
+            "Coverage: Generate LCOV Report",
+            "Coverage: Generate HTML Report"
+        ],
+        "group": "build", // You can assign it to a group
+        "problemMatcher": []
     }
 ]
 }

@@ -1,0 +1,38 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "(gdb) Launch WaffleTests",
+            "type": "cppdbg",
+            "request": "launch",
+            // IMPORTANT: Adjust this path to your actual test executable
+            "program": "${workspaceFolder}/build/tests/WaffleTests",
+            "args": [], // Any command-line arguments for your program
+            "stopAtEntry": false, // Set to true to stop at the program's main function
+            // IMPORTANT: Adjust CWD if your program expects to run from a different directory
+            "cwd": "${workspaceFolder}/build/tests", // Or "${workspaceFolder}" or where executable/resources are
+            "environment": [],
+            "externalConsole": false, // true to launch in a separate console window
+            "MIMode": "gdb",
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                },
+                {
+                    "description": "Set Disassembly Flavor to Intel",
+                    "text": "-gdb-set disassembly-flavor intel",
+                    "ignoreFailures": true
+                }
+            ],
+            // This task will run before debugging starts.
+            // Assumes "CMake: Build (Debug)" is defined in your tasks.json
+            // and builds the target specified in "program".
+            "preLaunchTask": "CMake: Build (Debug)"
+        }
+    ]
+}
