@@ -40,7 +40,7 @@
 
   // This command runs after the container is created.
   // It's a common fix for Git repository ownership issues within the container.
-  "postCreateCommand": "git config --global --add safe.directory ${containerWorkspaceFolder} && sudo apt-get update && sudo apt-get install -y lcov",
+  "postCreateCommand": "git config --global --add safe.directory ${containerWorkspaceFolder} && sudo apt-get update && sudo apt-get install -y lcov gcovr",
 
   // Run as the non-root 'vscode' user (common in dev container images)
   "remoteUser": "vscode"

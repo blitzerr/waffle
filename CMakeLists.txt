@@ -108,5 +108,12 @@ else()
 endif()
 
 # --- Examples Setup ---
+option(WAFFLE_BUILD_EXAMPLES "Build Waffle examples" ON) # Default to ON for normal builds
+
 # Examples should demonstrate usage of the public Waffle library.
-add_subdirectory(examples)
+if(WAFFLE_BUILD_EXAMPLES)
+  message(STATUS "Examples are enabled.")
+  add_subdirectory(examples)
+else()
+  message(STATUS "Examples are disabled.")
+endif()
