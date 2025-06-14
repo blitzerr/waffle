@@ -75,15 +75,25 @@ std::atomic<int> TestObject::moves{0};
 std::atomic<int> TestObject::copies{0};
 
 TEST_CASE("MpscRingBuffer Construction and Capacity", "[ring_buffer]") {
+  /**
+   * @brief Verifies MpscRingBuffer constructor behavior and capacity
+   * management. Objective: Ensure the constructor handles invalid capacity and
+   * that the internal capacity is correctly rounded up to the next power of
+   * two. Also tests basic operations at the minimum effective capacity.
+   */
   SECTION("Zero capacity throws") {
     REQUIRE_THROWS_AS(MpscRingBuffer<int>(0), std::invalid_argument);
   }
 
   SECTION("Capacity is rounded to next power of two") {
-    // Internal capacity is not directly exposed, but we can infer it by filling
+    // Internal capacity is not directly exposed, so we infer it by attempting
+    // to fill the buffer to what we expect its power-of-two capacity to be.
+    // next_power_of_two(0) and next_power_of_two(1) both result in 2.
+    // For n >= 2, it's the smallest power of two p such that p >= n.
     MpscRingBuffer<int> rb3(3); // next_power_of_two(3) is 4
-    for (int i = 0; i < 4; ++i)
+    for (int i = 0; i < 4; ++i) {
       REQUIRE(rb3.try_emplace(i));
+    }
     REQUIRE_FALSE(rb3.try_emplace(4));
 
     MpscRingBuffer<int> rb4(4); // next_power_of_two(4) is 4
@@ -110,6 +120,13 @@ TEST_CASE("MpscRingBuffer Construction and Capacity", "[ring_buffer]") {
 }
 
 TEST_CASE("MpscRingBuffer Basic Operations", "[ring_buffer]") {
+  /**
+   * @brief Tests fundamental single-threaded operations of the MpscRingBuffer.
+   * Objective: Verify `try_emplace` and `try_pop` under simple conditions.
+   * Setup: A ring buffer with a small, fixed capacity (4).
+   * Verifies: Correctness of adding and removing single elements, behavior on
+   * empty/full buffer.
+   */
   MpscRingBuffer<int> rb(4); // Actual capacity will be 4
 
   SECTION("Try emplace and try pop single element") {
@@ -164,6 +181,14 @@ TEST_CASE("MpscRingBuffer Basic Operations", "[ring_buffer]") {
 }
 
 TEST_CASE("MpscRingBuffer Wrap Around Behavior", "[ring_buffer]") {
+  /**
+   * @brief Verifies the correct wrap-around behavior of head and tail pointers.
+   * Objective: Ensure that as items are added and removed, the internal indices
+   *            correctly wrap around the buffer's capacity.
+   * Setup: Buffers with small capacities (2 and 4) to easily induce
+   * wrap-around. Verifies: Items are retrieved in FIFO order even after
+   * multiple wraps.
+   */
   MpscRingBuffer<int> rb(2); // Actual capacity 2
 
   // Fill
@@ -209,6 +234,14 @@ TEST_CASE("MpscRingBuffer Wrap Around Behavior", "[ring_buffer]") {
 
 TEST_CASE("MpscRingBuffer Object Lifecycle and Move Semantics",
           "[ring_buffer]") {
+  /**
+   * @brief Verifies correct object lifecycle (construction, destruction, moves)
+   *        and the absence of copies when using TestObject with the ring
+   * buffer. Objective: Ensure `TestObject` instances are handled correctly by
+   * `try_emplace` (move construction) and `try_pop` (move
+   * assignment/construction), and that objects left in the buffer are
+   * destructed when the buffer itself is.
+   */
   TestObject::reset_counts();
   {
     MpscRingBuffer<TestObject> rb(2); // Capacity 2
@@ -314,6 +347,13 @@ TEST_CASE("MpscRingBuffer Object Lifecycle and Move Semantics",
 TEST_CASE(
     "MpscRingBuffer Stress Test (Single Producer, Single Consumer Sequential)",
     "[ring_buffer][stress]") {
+  /**
+   * @brief Performs a stress test with a large number of sequential emplace/pop
+   * operations. Objective: Verify the ring buffer's correctness and stability
+   * under a high volume of operations in a single-threaded producer/consumer
+   * scenario. This is not a concurrency test but checks for issues that might
+   * arise from many wraps or prolonged use.
+   */
   const size_t capacity = 128; // Actual capacity will be 128
   const int iterations = 10000;
   MpscRingBuffer<long> rb(capacity);
@@ -324,7 +364,7 @@ TEST_CASE(
 
   for (int i = 0; i < iterations; ++i) {
     // Try to produce a few items
-    for (int j = 0; j < 5; ++j) {
+    for (int j = 0; j < 5; ++j) { // Simulate bursty production
       long val_to_produce = static_cast<long>(i * 10 + j);
       if (rb.try_emplace(val_to_produce)) {
         produced_sum += val_to_produce;
@@ -335,7 +375,7 @@ TEST_CASE(
     }
 
     // Try to consume a few items
-    for (int k = 0; k < 3; ++k) {
+    for (int k = 0; k < 3; ++k) { // Simulate bursty consumption
       long Rval;
       if (rb.try_pop(Rval)) {
         consumed_sum += Rval;
@@ -362,8 +402,10 @@ TEST_CASE(
     "MpscRingBuffer Multi-Producer, Single-Consumer with TestObject Lifecycle",
     "[ring_buffer][threaded][lifecycle]") {
   /**
-   * @brief Tests MPSC ring buffer with TestObject instances to ensure correct
-   * object lifecycle management (construction, destruction, moves, no copies)
+   * @brief Objective: Verifies correct TestObject lifecycle management
+   * (construction, destruction, moves, and absence of copies) in a concurrent
+   * MPSC scenario. Setup: Multiple producers, one consumer. TestObjects with
+   * unique IDs.
    * under concurrent producer operations.
    */
   TestObject::reset_counts(); // Reset once for the entire test case
@@ -387,6 +429,8 @@ TEST_CASE(
         std::string data =
             "P" + std::to_string(producer_index) + "_Item" + std::to_string(i);
 
+        // Loop until emplace succeeds, yielding to allow other threads
+        // (especially the consumer if the buffer is full) to make progress.
         while (!rb.try_emplace(object_id, data)) {
           std::this_thread::yield();
         }
@@ -403,6 +447,9 @@ TEST_CASE(
     int consumed_count = 0;
     TestObject out_val_consumer; // Created once, reused for popping
 
+    // Consumer loop: attempts to pop items. Yields if the buffer is
+    // temporarily empty or if producers are still working, to avoid
+    // busy-waiting while ensuring all items are eventually processed.
     while (consumed_count < total_items) {
       if (rb.try_pop(out_val_consumer)) {
         REQUIRE(consumed_ids.find(out_val_consumer.id) == consumed_ids.end());
@@ -411,9 +458,11 @@ TEST_CASE(
       } else {
         if (items_successfully_produced_count.load(std::memory_order_acquire) ==
                 total_items &&
-            consumed_count < total_items) {
+            consumed_count <
+                total_items) { // All items produced, but not all consumed yet
           std::this_thread::yield();
-        } else if (consumed_count < total_items) {
+        } else if (consumed_count < total_items) { // Producers still working or
+                                                   // consumer catching up
           std::this_thread::yield();
         }
       }
@@ -453,10 +502,11 @@ TEST_CASE(
 TEST_CASE("MpscRingBuffer High Contention MPSC Test",
           "[ring_buffer][threaded][contention]") {
   /**
-   * @brief Tests MPSC ring buffer under high producer contention with a small
-   * buffer. This stresses atomic operations for slot acquisition (_tail) and
-   * data publishing/consumption (_ready_flags), checking for correctness and
-   * liveness.
+   * @brief Objective: Stress concurrent slot acquisition (_tail CAS by
+   * producers) and data publishing/consumption (_ready_flags) with many
+   * producers and a small buffer. Setup: High number of producers, very small
+   * buffer capacity (8). Verifies: Correctness (all unique items consumed) and
+   * liveness (test completes).
    */
   const size_t capacity = 8; // Very small capacity to force contention
   const int num_producers = std::max(4u, std::thread::hardware_concurrency() *
@@ -486,6 +536,7 @@ TEST_CASE("MpscRingBuffer High Contention MPSC Test",
   std::vector<long> consumed_items_vec;
   consumed_items_vec.reserve(total_items);
   int consumed_count = 0;
+  // Consumer loop similar to other threaded tests.
 
   while (consumed_count < total_items) {
     long val;
@@ -511,18 +562,15 @@ TEST_CASE("MpscRingBuffer High Contention MPSC Test",
   REQUIRE(consumed_items_vec.size() == static_cast<size_t>(total_items));
 
   // Verify all unique items are present
+  // First, sort and check for adjacent duplicates to quickly find issues.
+  // Then, use a set to confirm the total count of unique items matches the
+  // expected total, ensuring no items were lost and all produced items were
+  // unique.
   std::sort(consumed_items_vec.begin(), consumed_items_vec.end());
   for (int i = 0; i < total_items - 1; ++i) {
     REQUIRE(consumed_items_vec[i] <
-            consumed_items_vec[i + 1]); // Check for duplicates after sort
+            consumed_items_vec[i + 1]); // Checks for duplicates after sort
   }
-  // A more robust check would be to ensure all expected values are present,
-  // similar to the "Simplified Multi-Producer" test, but for high contention,
-  // ensuring no loss and no duplicates is the primary goal.
-  // The generation of `value` ensures uniqueness if all are produced and
-  // consumed once. If `consumed_items_vec.size() == total_items` and there are
-  // no duplicates, and values are generated from a contiguous range, then all
-  // items are present.
   std::set<long> unique_consumed_items(consumed_items_vec.begin(),
                                        consumed_items_vec.end());
   REQUIRE(unique_consumed_items.size() == static_cast<size_t>(total_items));
@@ -531,6 +579,13 @@ TEST_CASE("MpscRingBuffer High Contention MPSC Test",
 TEST_CASE(
     "MpscRingBuffer Simplified Multi-Producer, Single-Consumer Sanity Test",
     "[ring_buffer][threaded][simple_sanity]") {
+  /**
+   * @brief Objective: A general sanity check for MPSC operation ensuring all
+   * uniquely generated items from multiple producers are consumed exactly once
+   * by a single consumer. Setup: Multiple producers generating unique `long`
+   * values based on producer index and item index. Verifies: All produced items
+   * are present in the consumed set, each exactly once.
+   */
   const size_t capacity = 64; // A smaller capacity can increase contention
   const int num_producers = 3;
   const int items_per_producer =
@@ -653,9 +708,11 @@ TEST_CASE(
 TEST_CASE("MpscRingBuffer Producers Faster Than Consumer",
           "[ring_buffer][threaded][rate_mismatch]") {
   /**
-   * @brief Simulates producers operating faster than the consumer, testing
-   * behavior when the buffer frequently becomes full and ensuring all items are
-   * eventually consumed.
+   * @brief Objective: Test behavior when producers generate data faster than
+   * the consumer can process, leading to the buffer frequently becoming full.
+   * Setup: Producers emplace items rapidly. The consumer introduces a small,
+   * periodic delay to simulate slower processing. Verifies: All items are
+   * eventually consumed despite buffer-full conditions.
    */
   const size_t capacity = 16;
   const int num_producers = 2;
@@ -688,7 +745,8 @@ TEST_CASE("MpscRingBuffer Producers Faster Than Consumer",
       consumed_values.insert(val);
       consumed_count++;
       // Simulate slower consumer by occasionally sleeping
-      if (consumed_count % (capacity * 2) ==
+      // Sleep less frequently than typical buffer fills to allow it to fill up.
+      if (consumed_count % (capacity * 2 /*some factor > 1*/) ==
           0) { // Sleep less frequently than buffer fills
         std::this_thread::sleep_for(std::chrono::microseconds(10));
       }
@@ -708,9 +766,11 @@ TEST_CASE("MpscRingBuffer Producers Faster Than Consumer",
 TEST_CASE("MpscRingBuffer Consumer Faster Than Producers",
           "[ring_buffer][threaded][rate_mismatch]") {
   /**
-   * @brief Simulates the consumer operating faster than producers, testing
-   * behavior when the buffer is frequently empty and ensuring `try_pop`
-   * correctly indicates no items and eventually consumes all produced items.
+   * @brief Objective: Test behavior when the consumer attempts to pop items
+   * faster than producers can supply, leading to the buffer frequently being
+   * empty. Setup: A single producer adds items with an artificial delay. The
+   * consumer attempts to pop rapidly. Verifies: `try_pop` correctly returns
+   * `false` when empty, and all items are eventually consumed.
    */
   const size_t capacity = 16;
   const int num_producers = 1; // Single producer to make rate control easier
@@ -755,6 +815,11 @@ TEST_CASE("MpscRingBuffer Consumer Faster Than Producers",
 }
 
 TEST_CASE("next_power_of_two utility function", "[ring_buffer][utility]") {
+  /**
+   * @brief Verifies the correctness of the `next_power_of_two` utility
+   * function. Objective: Ensure the function behaves as expected for various
+   * inputs, including edge cases.
+   */
   SECTION("Small values") {
     REQUIRE(next_power_of_two(0) == 2);
     REQUIRE(next_power_of_two(1) == 2);
