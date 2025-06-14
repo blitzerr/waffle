@@ -42,3 +42,6 @@ coverage.info
 coverage.info.cleaned
 coverage_report_lcov/
 lcov_report/
+
+# CMake FetchContent persistent directory
+.cmake_dependencies/

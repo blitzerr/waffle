@@ -3,6 +3,13 @@ cmake_minimum_required(VERSION 3.20) # Using a recent, existing CMake version fo
 # Set the project name
 project(Waffle VERSION 1.0 LANGUAGES CXX)
 
+# Configure FetchContent to use a persistent directory for dependencies.
+# This directory will be outside the main build folder, so dependencies
+# like Catch2 aren't rebuilt on every clean build of the main project.
+include(FetchContent)
+set(FETCHCONTENT_BASE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/.cmake_dependencies)
+message(STATUS "FETCHCONTENT_BASE_DIR explicitly set to: ${FETCHCONTENT_BASE_DIR}")
+
 # Disable compiler-specific extensions (e.g., GNU extensions) for stricter C++ standard compliance.
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_CXX_STANDARD 20) # Set default C++ standard
