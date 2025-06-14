@@ -24,7 +24,7 @@ add_executable(WaffleTests
 
 # Link the test executable against WaffleHelpers (defined in the parent scope)
 # and Catch2::Catch2WithMain (provided by FetchContent_MakeAvailable(Catch2)).
-target_link_libraries(WaffleTests PRIVATE WaffleHelpers Catch2::Catch2WithMain)
+target_link_libraries(WaffleTests PRIVATE Waffle WaffleHelpers Catch2::Catch2WithMain)
 
 # Set C++ standard for the test target as well
 target_compile_features(WaffleTests PRIVATE cxx_std_20)

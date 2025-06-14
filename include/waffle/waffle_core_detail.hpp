@@ -1,25 +1,12 @@
 #pragma once
 
-// These are internal helper utilities for Waffle's core functionality.
-// This file is intended to be included by waffle_core.hpp after essential
-// types like Id, Attribute, CausedBy, and MAX_ATTRIBUTES_PER_TRACELET
-// have been defined within the Waffle namespace.
 #include "waffle_common_types.hpp" // Provides Id, CausedBy, Attribute, MAX_ATTRIBUTES_PER_TRACELET, fnv1a_hash, StaticStringSource, CACHE_LINE_SIZE and forward decls for Tracer, Span.
 #include <array>                   // For std::array
 #include <type_traits>             // For std::is_same_v
 #include <utility>                 // For std::forward, std::pair, std::decay_t
 
-// The contents of this file are expected to be within the Waffle::detail
-// namespace. waffle_core.hpp should ensure it includes this file within the
-// Waffle namespace context.
-
-// Assumes this file is included within an existing "namespace Waffle {" block.
 namespace Waffle::detail {
 
-// --- Argument Parsing Helpers ---
-// (Moved from waffle_core.hpp)
-
-// A helper struct to parse the optional CausedBy tag from variadic arguments.
 struct ParsedArgs {
   Id cause{kInvalidId};
 };
