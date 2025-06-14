@@ -55,13 +55,22 @@ set(COVERAGE_COMPILE_FLAGS "")
 set(COVERAGE_LINK_FLAGS "")
 
 if(BUILD_COVERAGE)
-  if(CMAKE_CXX_COMPILER_ID MATCHES "GNU")
-    message(STATUS "Code coverage flags enabled for GCC.")
-    # For GCC, --coverage enables gcov support (-fprofile-arcs -ftest-coverage)
-    set(COVERAGE_COMPILE_FLAGS "--coverage")
-    set(COVERAGE_LINK_FLAGS "--coverage")
+  if(CMAKE_CXX_COMPILER_ID MATCHES "GNU" OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    # These flags enable gcov-style coverage information generation for both GCC and Clang.
+    # GCC's --coverage is a shorthand for these and linking libgcov.
+    # For Clang, these flags produce data that llvm-cov gcov can process.
+    set(COVERAGE_FLAGS_LIST -fprofile-arcs -ftest-coverage)
+
+    # For Debug builds (which is what the CI uses), it's often good practice
+    # to ensure optimizations are low (e.g., -O0) for accurate coverage mapping.
+    # CMAKE_BUILD_TYPE=Debug usually handles this, but you could add -O0 explicitly if needed:
+    # list(APPEND COVERAGE_FLAGS_LIST -O0)
+
+    string(JOIN " " COVERAGE_COMPILE_FLAGS "${COVERAGE_FLAGS_LIST}")
+    string(JOIN " " COVERAGE_LINK_FLAGS "${COVERAGE_FLAGS_LIST}") # These flags are also used by the linker
+    message(STATUS "Code coverage flags enabled for ${CMAKE_CXX_COMPILER_ID}: ${COVERAGE_COMPILE_FLAGS}")
   else()
-    message(WARNING "BUILD_COVERAGE is ON, but the current C++ compiler (${CMAKE_CXX_COMPILER_ID}) is not GNU GCC. gcov coverage will not be enabled.")
+    message(WARNING "BUILD_COVERAGE is ON, but the current C++ compiler (${CMAKE_CXX_COMPILER_ID}) is not GCC or Clang. Coverage flags will not be set.")
   endif()
 endif()
 

@@ -1,0 +1,125 @@
+name: C++ CI Workflow
+
+on:
+  push:
+    branches: [ main, master ] # Adjust if your mainline branch has a different name
+  pull_request:
+    branches: [ main, master ] # Adjust if your mainline branch has a different name
+
+permissions:
+  contents: read          # To checkout the repository
+  pull-requests: write  # For Codecov to comment on PRs
+  checks: write         # For Codecov to post status checks
+
+jobs:
+  build_test_benchmark_coverage:
+    name: ${{ matrix.compiler.name }} - Build, Test, Benchmark & Coverage
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false # Ensures all compiler jobs run even if one fails
+      matrix:
+        compiler:
+          - name: GCC
+            image: gcc:13
+            c_compiler: gcc
+            cxx_compiler: g++
+            gcov_tool: gcov
+          - name: Clang
+            image: silkeh/clang:15 # Using a Clang 15 image. You can choose other versions/providers.
+            c_compiler: clang
+            cxx_compiler: clang++
+            gcov_tool: llvm-cov gcov # llvm-cov can process gcov-style output from Clang
+
+    container:
+      image: ${{ matrix.compiler.image }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            cmake \
+            ninja-build \
+            python3-pip \
+            gcovr
+          # The chosen Clang image (silkeh/clang:15) should include llvm-cov.
+          # If using a different/minimal Clang image, you might need to install llvm:
+          # if [ "${{ matrix.compiler.c_compiler }}" = "clang" ]; then \
+          #   apt-get install -y llvm; \
+          # fi
+
+      - name: Configure CMake
+        run: |
+          # This command assumes your CMakeLists.txt supports these options:
+          # - WAFFLE_BUILD_TESTS=ON
+          # - WAFFLE_BUILD_BENCHMARKS=ON
+          # - BUILD_COVERAGE=ON (should add -fprofile-arcs -ftest-coverage)
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_C_COMPILER=${{ matrix.compiler.c_compiler }} \
+            -DCMAKE_CXX_COMPILER=${{ matrix.compiler.cxx_compiler }} \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DWAFFLE_BUILD_TESTS=ON \
+            -DWAFFLE_BUILD_BENCHMARKS=ON \
+            -DBUILD_COVERAGE=ON
+
+      - name: Build project (library, tests, and benchmarks)
+        run: cmake --build build --parallel
+
+      - name: Run tests
+        working-directory: ./build
+        run: |
+          # If you use CTest and have configured your tests in CMake (e.g., with add_test()):
+          ctest --output-on-failure
+          #
+          # Alternatively, if you run executables directly, adjust the path and name:
+          # Example: ./tests/ring_buffer_tests
+
+      - name: Run benchmarks
+        working-directory: ./build
+        run: |
+          # Adjust the path and name of your benchmark executable as needed.
+          # Example: ./benchmarks/ring_buffer_benchmarks
+          # Outputting to a compiler-specific file name
+          ./benchmarks/ring_buffer_benchmarks --benchmark_min_time=0.01s --benchmark_repetitions=1 --benchmark_out_format=json --benchmark_out=benchmark_results_${{ matrix.compiler.name }}.json
+
+      - name: Generate coverage report (gcovr)
+        working-directory: ./build # gcovr works best when run from the build directory
+        run: |
+          # gcovr uses .gcno and .gcda files.
+          # The filter ensures we only report coverage for your source files.
+          # Adjust '--filter ../src/waffle/' if your source layout is different.
+          # Using compiler-specific gcov tool and output file names.
+          gcovr --root ../ \
+                --filter ../src/waffle/ \
+                --print-summary \
+                --html-details coverage-report_${{ matrix.compiler.name }}.html \
+                --xml coverage_${{ matrix.compiler.name }}.xml \
+                --gcov-executable "${{ matrix.compiler.gcov_tool }}"
+
+      - name: Upload Coverage Report to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }} # Optional: for private repos.
+          files: ./build/coverage_${{ matrix.compiler.name }}.xml # Path to the compiler-specific XML report
+          flags: ${{ matrix.compiler.name }}                  # Tag the report in Codecov (e.g., GCC, Clang)
+          name: codecov-upload-${{ matrix.compiler.name }}     # Optional: Name for the upload job in Codecov UI
+          fail_ci_if_error: true
+          verbose: true
+
+      - name: Upload HTML Coverage Report as Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: html-coverage-report-${{ matrix.compiler.name }}
+          path: ./build/coverage-report_${{ matrix.compiler.name }}.html
+          if-no-files-found: error
+
+      - name: Upload Benchmark Results as Artifact
+        if: always() # Run even if previous steps fail
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results-${{ matrix.compiler.name }}
+          path: ./build/benchmark_results_${{ matrix.compiler.name }}.json
+          if-no-files-found: ignore
