@@ -6,31 +6,35 @@
 #include <vector>
 #include <waffle/helpers/mpsc_ring_buffer.hpp>
 
+#include <algorithm> // For std::sort, std::max
+#include <set>       // For std::set in TestObject lifecycle test
 // Helper struct to track constructions, destructions, moves, copies
 struct TestObject {
   int id;
   std::string data;
-  static int constructions;
-  static int destructions;
-  static int moves;
-  static int copies;
+  static std::atomic<int> constructions;
+  static std::atomic<int> destructions;
+  static std::atomic<int> moves;
+  static std::atomic<int> copies;
 
   TestObject(int i = 0, std::string d = "default") : id(i), data(std::move(d)) {
-    constructions++;
+    constructions.fetch_add(1, std::memory_order_relaxed);
   }
 
-  ~TestObject() { destructions++; }
+  ~TestObject() { destructions.fetch_add(1, std::memory_order_relaxed); }
 
   TestObject(const TestObject &other) : id(other.id), data(other.data) {
-    copies++;
-    constructions++; // Copy construction is still a construction
+    copies.fetch_add(1, std::memory_order_relaxed);
+    constructions.fetch_add(
+        1,
+        std::memory_order_relaxed); // Copy construction is still a construction
   }
 
   TestObject &operator=(const TestObject &other) {
     if (this != &other) {
       id = other.id;
       data = other.data;
-      copies++;
+      copies.fetch_add(1, std::memory_order_relaxed);
     }
     return *this;
   }
@@ -38,8 +42,10 @@ struct TestObject {
   TestObject(TestObject &&other) noexcept
       : id(other.id), data(std::move(other.data)) {
     other.id = -1; // Mark as moved-from
-    moves++;
-    constructions++; // Move construction is still a construction
+    moves.fetch_add(1, std::memory_order_relaxed);
+    constructions.fetch_add(
+        1,
+        std::memory_order_relaxed); // Move construction is still a construction
   }
 
   TestObject &operator=(TestObject &&other) noexcept {
@@ -47,27 +53,26 @@ struct TestObject {
       id = other.id;
       data = std::move(other.data);
       other.id = -1; // Mark as moved-from
-      moves++;
+      moves.fetch_add(1, std::memory_order_relaxed);
     }
     return *this;
   }
 
   static void reset_counts() {
-    constructions = 0;
-    destructions = 0;
-    moves = 0;
-    copies = 0;
+    constructions.store(0, std::memory_order_relaxed);
+    destructions.store(0, std::memory_order_relaxed);
+    moves.store(0, std::memory_order_relaxed);
+    copies.store(0, std::memory_order_relaxed);
   }
 
   bool operator==(const TestObject &other) const {
     return id == other.id && data == other.data;
   }
 };
-
-int TestObject::constructions = 0;
-int TestObject::destructions = 0;
-int TestObject::moves = 0;
-int TestObject::copies = 0;
+std::atomic<int> TestObject::constructions{0};
+std::atomic<int> TestObject::destructions{0};
+std::atomic<int> TestObject::moves{0};
+std::atomic<int> TestObject::copies{0};
 
 TEST_CASE("MpscRingBuffer Construction and Capacity", "[ring_buffer]") {
   SECTION("Zero capacity throws") {
@@ -87,11 +92,20 @@ TEST_CASE("MpscRingBuffer Construction and Capacity", "[ring_buffer]") {
     REQUIRE_FALSE(rb4.try_emplace(4));
 
     MpscRingBuffer<int> rb1(
-        1); // next_power_of_two(1) is 2 (as per next_power_of_two impl for n=1
-            // -> p=1, then p <<=1 -> p=2)
+        1); // next_power_of_two(1) is 2. Effective capacity is 2.
     REQUIRE(rb1.try_emplace(0));
     REQUIRE(rb1.try_emplace(1));
     REQUIRE_FALSE(rb1.try_emplace(2));
+    // Pop one and ensure it's correct, then try to emplace again (wrap-around)
+    int val;
+    REQUIRE(rb1.try_pop(val));
+    REQUIRE(val == 0);
+    REQUIRE(rb1.try_emplace(2)); // Should succeed
+    REQUIRE(rb1.try_pop(val));
+    REQUIRE(val == 1);
+    REQUIRE(rb1.try_pop(val));
+    REQUIRE(val == 2);
+    REQUIRE_FALSE(rb1.try_pop(val)); // Empty
   }
 }
 
@@ -208,21 +222,22 @@ TEST_CASE("MpscRingBuffer Object Lifecycle and Move Semantics",
       // 2. new (&_buffer[...]) TestObject(std::move(temp_obj)); (move
       // construction) It also performs one move operation.
       REQUIRE(rb.try_emplace(1, "obj1"));
-      REQUIRE(TestObject::constructions ==
+      REQUIRE(TestObject::constructions.load(std::memory_order_relaxed) ==
               2); // 1 for temp_obj + 1 for move-construction into buffer
-      REQUIRE(TestObject::moves == 1); // 1 for moving temp_obj into buffer
-      REQUIRE(TestObject::copies == 0);
+      REQUIRE(TestObject::moves.load(std::memory_order_relaxed) ==
+              1); // 1 for moving temp_obj into buffer
+      REQUIRE(TestObject::copies.load(std::memory_order_relaxed) == 0);
 
       REQUIRE(rb.try_emplace(2, "obj2"));
-      REQUIRE(TestObject::constructions ==
+      REQUIRE(TestObject::constructions.load(std::memory_order_relaxed) ==
               4); // Cumulative: 2 previous + 2 for this emplace
-      REQUIRE(TestObject::moves ==
+      REQUIRE(TestObject::moves.load(std::memory_order_relaxed) ==
               2); // Cumulative: 1 previous + 1 for this emplace
-      REQUIRE(TestObject::copies == 0);
+      REQUIRE(TestObject::copies.load(std::memory_order_relaxed) == 0);
 
       TestObject out_val;
       // Default construction of out_val increments constructions.
-      REQUIRE(TestObject::constructions ==
+      REQUIRE(TestObject::constructions.load(std::memory_order_relaxed) ==
               5);                 // 4 from emplaces + 1 for out_val
       TestObject::reset_counts(); // Reset before pop
 
@@ -230,18 +245,18 @@ TEST_CASE("MpscRingBuffer Object Lifecycle and Move Semantics",
                                     // destruction (in buffer)
       REQUIRE(out_val.id == 1);
       REQUIRE(out_val.data == "obj1");
-      REQUIRE(TestObject::moves == 1);
-      REQUIRE(TestObject::destructions == 1);
+      REQUIRE(TestObject::moves.load(std::memory_order_relaxed) == 1);
+      REQUIRE(TestObject::destructions.load(std::memory_order_relaxed) == 1);
       // out_val was move-assigned, not constructed here. No new TestObject
       // constructions from pop.
-      REQUIRE(TestObject::constructions == 0);
+      REQUIRE(TestObject::constructions.load(std::memory_order_relaxed) == 0);
 
       TestObject::reset_counts();
       REQUIRE(rb.try_pop(out_val)); // 1 move, 1 destruction
       REQUIRE(out_val.id == 2);
       REQUIRE(out_val.data == "obj2");
-      REQUIRE(TestObject::moves == 1);
-      REQUIRE(TestObject::destructions == 1);
+      REQUIRE(TestObject::moves.load(std::memory_order_relaxed) == 1);
+      REQUIRE(TestObject::destructions.load(std::memory_order_relaxed) == 1);
 
       REQUIRE_FALSE(rb.try_pop(out_val));
     }
@@ -280,16 +295,17 @@ TEST_CASE("MpscRingBuffer Object Lifecycle and Move Semantics",
       // Counts after 2nd emplace: constructions = 4, moves = 2, destructions =
       // 2
 
-      REQUIRE(TestObject::constructions == 4);
+      REQUIRE(TestObject::constructions.load(std::memory_order_relaxed) == 4);
 
       // Emplace creates a temporary object, then moves it into the buffer. When
       // emplace returns, the temporary object is destructed, but the moved
       // object remains in the buffer. The destruction of the temporary object
       // is counted in one destruction per emplace.
-      REQUIRE(TestObject::destructions == 2);
+      REQUIRE(TestObject::destructions.load(std::memory_order_relaxed) == 2);
     } // rb_dtor goes out of scope
-    REQUIRE(TestObject::constructions == 4); // Constructions remain the same
-    REQUIRE(TestObject::destructions ==
+    REQUIRE(TestObject::constructions.load(std::memory_order_relaxed) ==
+            4); // Constructions remain the same
+    REQUIRE(TestObject::destructions.load(std::memory_order_relaxed) ==
             4); // Two objects (each from 2 constructions) destructed by
                 // ~MpscRingBuffer
   }
@@ -340,6 +356,176 @@ TEST_CASE(
   REQUIRE(produced_count > 0);
   REQUIRE(produced_count == consumed_count);
   REQUIRE(produced_sum == consumed_sum);
+}
+
+TEST_CASE(
+    "MpscRingBuffer Multi-Producer, Single-Consumer with TestObject Lifecycle",
+    "[ring_buffer][threaded][lifecycle]") {
+  /**
+   * @brief Tests MPSC ring buffer with TestObject instances to ensure correct
+   * object lifecycle management (construction, destruction, moves, no copies)
+   * under concurrent producer operations.
+   */
+  TestObject::reset_counts(); // Reset once for the entire test case
+
+  const size_t capacity = 64;
+  const int num_producers =
+      std::max(1u, std::thread::hardware_concurrency() / 2);
+  const int items_per_producer =
+      200; // Keep total items manageable for detailed checks
+  const int total_items = num_producers * items_per_producer;
+
+  { // Scope for MpscRingBuffer and TestObject out_val_consumer to ensure their
+    // destruction
+    MpscRingBuffer<TestObject> rb(capacity);
+    std::vector<std::thread> producer_threads;
+    std::atomic<int> items_successfully_produced_count{0};
+
+    auto producer_task = [&](int producer_index) {
+      for (int i = 0; i < items_per_producer; ++i) {
+        int object_id = producer_index * items_per_producer + i; // Unique ID
+        std::string data =
+            "P" + std::to_string(producer_index) + "_Item" + std::to_string(i);
+
+        while (!rb.try_emplace(object_id, data)) {
+          std::this_thread::yield();
+        }
+        items_successfully_produced_count.fetch_add(1,
+                                                    std::memory_order_relaxed);
+      }
+    };
+
+    for (int i = 0; i < num_producers; ++i) {
+      producer_threads.emplace_back(producer_task, i);
+    }
+
+    std::set<int> consumed_ids;
+    int consumed_count = 0;
+    TestObject out_val_consumer; // Created once, reused for popping
+
+    while (consumed_count < total_items) {
+      if (rb.try_pop(out_val_consumer)) {
+        REQUIRE(consumed_ids.find(out_val_consumer.id) == consumed_ids.end());
+        consumed_ids.insert(out_val_consumer.id);
+        consumed_count++;
+      } else {
+        if (items_successfully_produced_count.load(std::memory_order_acquire) ==
+                total_items &&
+            consumed_count < total_items) {
+          std::this_thread::yield();
+        } else if (consumed_count < total_items) {
+          std::this_thread::yield();
+        }
+      }
+    }
+
+    for (auto &t : producer_threads) {
+      t.join();
+    }
+
+    REQUIRE(consumed_count == total_items);
+    REQUIRE(consumed_ids.size() == static_cast<size_t>(total_items));
+
+    // For each item passing through:
+    // - try_emplace: 1 direct construction (temp_obj), 1 move-construction
+    // (into buffer). Total 2 constructions, 1 move.
+    //                temp_obj is destructed (1 destruction).
+    // - try_pop: 1 move (to out_val_consumer), 1 destruction (from buffer).
+    // Net per item: 2 constructions, 2 moves, 2 destructions.
+    // out_val_consumer: 1 construction (at its declaration).
+    // At the end of this scope, out_val_consumer is destructed (1 destruction).
+    // MpscRingBuffer is destructed (no items left, so no TestObject
+    // destructions from it).
+
+    // Expected moves: total_items * 2 (temp_obj to buffer, buffer to
+    // out_val_consumer)
+    REQUIRE(TestObject::moves.load(std::memory_order_relaxed) ==
+            (long long)total_items * 2);
+  } // MpscRingBuffer and out_val_consumer go out of scope here and are
+    // destructed.
+
+  // Global check after everything is destructed:
+  REQUIRE(TestObject::constructions.load(std::memory_order_relaxed) ==
+          TestObject::destructions.load(std::memory_order_relaxed));
+  REQUIRE(TestObject::copies.load(std::memory_order_relaxed) == 0);
+}
+
+TEST_CASE("MpscRingBuffer High Contention MPSC Test",
+          "[ring_buffer][threaded][contention]") {
+  /**
+   * @brief Tests MPSC ring buffer under high producer contention with a small
+   * buffer. This stresses atomic operations for slot acquisition (_tail) and
+   * data publishing/consumption (_ready_flags), checking for correctness and
+   * liveness.
+   */
+  const size_t capacity = 8; // Very small capacity to force contention
+  const int num_producers = std::max(4u, std::thread::hardware_concurrency() *
+                                             2); // High number of producers
+  const int items_per_producer = 1000;
+  const int total_items = num_producers * items_per_producer;
+
+  MpscRingBuffer<long> rb(capacity);
+  std::vector<std::thread> producer_threads;
+  std::atomic<int> items_successfully_produced_count{0};
+
+  auto producer_task = [&](int producer_index) {
+    for (int i = 0; i < items_per_producer; ++i) {
+      long value = static_cast<long>(producer_index * items_per_producer +
+                                     i); // Unique value
+      while (!rb.try_emplace(value)) {
+        std::this_thread::yield();
+      }
+      items_successfully_produced_count.fetch_add(1, std::memory_order_relaxed);
+    }
+  };
+
+  for (int i = 0; i < num_producers; ++i) {
+    producer_threads.emplace_back(producer_task, i);
+  }
+
+  std::vector<long> consumed_items_vec;
+  consumed_items_vec.reserve(total_items);
+  int consumed_count = 0;
+
+  while (consumed_count < total_items) {
+    long val;
+    if (rb.try_pop(val)) {
+      consumed_items_vec.push_back(val);
+      consumed_count++;
+    } else {
+      if (items_successfully_produced_count.load(std::memory_order_acquire) ==
+              total_items &&
+          consumed_count < total_items) {
+        std::this_thread::yield();
+      } else if (consumed_count < total_items) {
+        std::this_thread::yield();
+      }
+    }
+  }
+
+  for (auto &t : producer_threads) {
+    t.join();
+  }
+
+  REQUIRE(consumed_count == total_items);
+  REQUIRE(consumed_items_vec.size() == static_cast<size_t>(total_items));
+
+  // Verify all unique items are present
+  std::sort(consumed_items_vec.begin(), consumed_items_vec.end());
+  for (int i = 0; i < total_items - 1; ++i) {
+    REQUIRE(consumed_items_vec[i] <
+            consumed_items_vec[i + 1]); // Check for duplicates after sort
+  }
+  // A more robust check would be to ensure all expected values are present,
+  // similar to the "Simplified Multi-Producer" test, but for high contention,
+  // ensuring no loss and no duplicates is the primary goal.
+  // The generation of `value` ensures uniqueness if all are produced and
+  // consumed once. If `consumed_items_vec.size() == total_items` and there are
+  // no duplicates, and values are generated from a contiguous range, then all
+  // items are present.
+  std::set<long> unique_consumed_items(consumed_items_vec.begin(),
+                                       consumed_items_vec.end());
+  REQUIRE(unique_consumed_items.size() == static_cast<size_t>(total_items));
 }
 
 TEST_CASE(
@@ -464,6 +650,110 @@ TEST_CASE(
   REQUIRE(consumed_items_vec == expected_sorted_items);
 }
 
+TEST_CASE("MpscRingBuffer Producers Faster Than Consumer",
+          "[ring_buffer][threaded][rate_mismatch]") {
+  /**
+   * @brief Simulates producers operating faster than the consumer, testing
+   * behavior when the buffer frequently becomes full and ensuring all items are
+   * eventually consumed.
+   */
+  const size_t capacity = 16;
+  const int num_producers = 2;
+  const int items_per_producer = 1000;
+  const int total_items = num_producers * items_per_producer;
+
+  MpscRingBuffer<int> rb(capacity);
+  std::vector<std::thread> producer_threads;
+  std::atomic<int> items_successfully_produced_count{0};
+
+  auto producer_task = [&](int producer_index) {
+    for (int i = 0; i < items_per_producer; ++i) {
+      int value = producer_index * items_per_producer + i;
+      while (!rb.try_emplace(value)) { // Producers push as fast as possible
+        std::this_thread::yield();
+      }
+      items_successfully_produced_count.fetch_add(1, std::memory_order_relaxed);
+    }
+  };
+
+  for (int i = 0; i < num_producers; ++i) {
+    producer_threads.emplace_back(producer_task, i);
+  }
+
+  std::set<int> consumed_values;
+  int consumed_count = 0;
+  while (consumed_count < total_items) {
+    int val;
+    if (rb.try_pop(val)) {
+      consumed_values.insert(val);
+      consumed_count++;
+      // Simulate slower consumer by occasionally sleeping
+      if (consumed_count % (capacity * 2) ==
+          0) { // Sleep less frequently than buffer fills
+        std::this_thread::sleep_for(std::chrono::microseconds(10));
+      }
+    } else {
+      std::this_thread::yield(); // Yield if buffer is empty
+    }
+  }
+
+  for (auto &t : producer_threads) {
+    t.join();
+  }
+  REQUIRE(consumed_count == total_items);
+  REQUIRE(consumed_values.size() ==
+          static_cast<size_t>(total_items)); // Ensure all unique items consumed
+}
+
+TEST_CASE("MpscRingBuffer Consumer Faster Than Producers",
+          "[ring_buffer][threaded][rate_mismatch]") {
+  /**
+   * @brief Simulates the consumer operating faster than producers, testing
+   * behavior when the buffer is frequently empty and ensuring `try_pop`
+   * correctly indicates no items and eventually consumes all produced items.
+   */
+  const size_t capacity = 16;
+  const int num_producers = 1; // Single producer to make rate control easier
+  const int items_to_produce = 500;
+
+  MpscRingBuffer<int> rb(capacity);
+  std::atomic<bool> producer_finished{false};
+
+  std::thread producer_thread([&] {
+    for (int i = 0; i < items_to_produce; ++i) {
+      while (!rb.try_emplace(i)) {
+        std::this_thread::yield();
+      }
+      std::this_thread::sleep_for(
+          std::chrono::microseconds(50)); // Producer is slow
+    }
+    producer_finished.store(true, std::memory_order_release);
+  });
+
+  std::set<int> consumed_values;
+  int val;
+  int false_pop_count = 0;
+  while (consumed_values.size() < static_cast<size_t>(items_to_produce)) {
+    if (rb.try_pop(val)) {
+      consumed_values.insert(val);
+    } else {
+      false_pop_count++;
+      // Wrap the && expression in parentheses for Catch2
+      REQUIRE_FALSE((producer_finished.load(std::memory_order_acquire) &&
+                     consumed_values.size() ==
+                         static_cast<size_t>(
+                             items_to_produce))); // Should not be finished and
+                                                  // fully consumed if pop fails
+      std::this_thread::yield(); // Consumer is fast, might spin
+    }
+  }
+
+  producer_thread.join();
+  REQUIRE(consumed_values.size() == static_cast<size_t>(items_to_produce));
+  REQUIRE(false_pop_count >
+          0); // Ensure try_pop actually returned false sometimes
+}
+
 TEST_CASE("next_power_of_two utility function", "[ring_buffer][utility]") {
   SECTION("Small values") {
     REQUIRE(next_power_of_two(0) == 2);
@@ -498,14 +788,7 @@ TEST_CASE("next_power_of_two utility function", "[ring_buffer][utility]") {
     // Iterate through exponents k for P = 2^k, from k_max down to 1.
     // k_max is (num_size_t_bits - 1) for the largest power of two.
     // k_min is 1 for P=2.
-    for (int k = num_size_t_bits - 1; k >= 1; --k) {
-      // Ensure k is a valid exponent index, though k>=1 should cover this.
-      if (k < 0 || static_cast<unsigned int>(k) >=
-                       static_cast<unsigned int>(num_size_t_bits)) {
-        // This case should ideally not be hit if num_size_t_bits is reasonable
-        // (e.g. >=1) and k starts from num_size_t_bits - 1.
-        continue;
-      }
+    for (int k = (num_size_t_bits - 1); k >= 1; --k) {
       size_t power_of_2 = static_cast<size_t>(1) << k;
 
       INFO("Testing P = 2^" << k << " = " << power_of_2);
@@ -515,14 +798,11 @@ TEST_CASE("next_power_of_two utility function", "[ring_buffer][utility]") {
 
       // Test P-1. next_power_of_two(P-1) should be P.
       // This holds true for P>=2 because:
-      // if P=2, P-1=1. next_power_of_two(1)=2. Correct.
-      // if P>2, P-1 >= 2. The loop `while(p < n)` will make p equal to P.
+      // if P=2, P-1=1. next_power_of_two(1)=2.
+      // if P>2, P-1 >= 2. The bit-twiddling algorithm correctly rounds up.
       REQUIRE(next_power_of_two(power_of_2 - 1) == power_of_2);
 
       // Test P+1. Result should be P*2 (the next higher power of two).
-      // This test is only safe if P is not the largest_po2 (i.e., k <
-      // num_size_t_bits - 1). If P is the largest_po2, P+1 would cause
-      // next_power_of_two to loop indefinitely.
       if (k < num_size_t_bits - 1) {
         size_t next_higher_po2 = power_of_2 << 1;
         REQUIRE(next_power_of_two(power_of_2 + 1) == next_higher_po2);
