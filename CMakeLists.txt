@@ -15,45 +15,19 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_CXX_STANDARD 20) # Set default C++ standard
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# --- WaffleHelpers (Internal Library) ---
-# This subdirectory defines the WaffleHelpers INTERFACE library,
-# which includes components like mpsc_ring_buffer.hpp.
-# Its include path will be src/.
+# --- Source Directory (src) ---
+# This subdirectory defines the main Waffle library (STATIC) and
+# the internal WaffleHelpers library (INTERFACE).
 add_subdirectory(src)
 
 # --- Waffle (Public Library) ---
 # This is the main public library target.
-# It will compile sources from the src/ directory.
-add_library(Waffle STATIC) # Or SHARED if you prefer
-
-# Example: add_library(Waffle ...)
-
+# The Waffle target is now defined in src/CMakeLists.txt.
 if(TARGET Waffle AND BUILD_COVERAGE AND COVERAGE_COMPILE_FLAGS)
   target_compile_options(Waffle PRIVATE ${COVERAGE_COMPILE_FLAGS})
   target_link_options(Waffle PRIVATE ${COVERAGE_LINK_FLAGS}) # Requires CMake 3.13+
   # For older CMake, you might try adding to target_link_libraries or CMAKE_CXX_FLAGS/CMAKE_EXE_LINKER_FLAGS
 endif()
-
-
-# Add source files for the Waffle library.
-# Paths are relative to this CMakeLists.txt (CMAKE_CURRENT_SOURCE_DIR).
-target_sources(Waffle PRIVATE
-    src/waffle/waffle_core.cpp
-    # Add any other .cpp files from src/ that belong to the Waffle library here
-)
-
-# Public include directory for the Waffle library.
-# Users will include headers from here (e.g., <waffle/tracer.hpp>).
-# PUBLIC makes these includes available to Waffle's own sources and to consumers.
-target_include_directories(Waffle PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<INSTALL_INTERFACE:include> # For installation
-)
-
-# The public Waffle library (waffle_core.hpp) uses WaffleHelpers.
-# PUBLIC ensures Waffle's sources can find WaffleHelpers headers,
-# and consumers of Waffle also get WaffleHelpers' include directories if needed.
-target_link_libraries(Waffle PUBLIC WaffleHelpers)
 
 # Option to enable code coverage
 option(BUILD_COVERAGE "Enable code coverage support (for GCC/gcov)" OFF)
