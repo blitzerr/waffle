@@ -1,26 +1,22 @@
 # CMakeLists.txt for the Waffle tests
 
-# Include FetchContent module to download dependencies
-include(FetchContent)
-
-# Declare Catch2 as a dependency
-# Using a specific tag is recommended for reproducibility.
-# As of early 2024, v3.5.2 is a recent stable tag for Catch2 v3.
-FetchContent_Declare(
-  Catch2
-  GIT_REPOSITORY https://github.com/catchorg/Catch2.git
-  GIT_TAG        v3.5.2 # You can update this to a newer stable Catch2 v3 tag
-)
-
-# Make Catch2 available. This will download (if needed) and configure it.
-# The Catch2 targets (like Catch2::Catch2WithMain) will be available after this.
-FetchContent_MakeAvailable(Catch2)
+# Find the Catch2 package.
+# CMAKE_PREFIX_PATH should have been updated in the root CMakeLists.txt
+# to include the installation directory of the externally built Catch2.
+# The `catch2_ep` target (ExternalProject) must have been built and installed at least once
+# for Catch2Config.cmake to be available.
+find_package(Catch2 3 REQUIRED CONFIG) # Requesting Catch2 v3 specifically
 
 # Add the test executable.
 # Source files are relative to this CMakeLists.txt (i.e., the 'tests' directory).
 add_executable(WaffleTests
     waffle_tests.cpp
     ring_buffer_tests.cpp)
+
+# Ensure WaffleTests depends on the external project target for Catch2.
+# This guarantees catch2_ep is built before WaffleTests attempts to link.
+# The target `catch2_ep` is defined in the parent scope (root CMakeLists.txt).
+add_dependencies(WaffleTests catch2_ep)
 
 # Link the test executable against WaffleHelpers (defined in the parent scope)
 # and Catch2::Catch2WithMain (provided by FetchContent_MakeAvailable(Catch2)).
