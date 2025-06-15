@@ -8,11 +8,11 @@
 #include <thread>
 #include <unordered_map>
 
+#include "waffle/waffle_common_types.hpp"
 #include "waffle_core_detail.hpp" // Provides detail::extract_attributes, detail::parse_args_impl. Depends on types from waffle_common_types.hpp.
 #include <waffle/helpers/mpsc_ring_buffer.hpp>
 
 namespace Waffle {
-
 // --- Forward Declarations ---
 // Forward declarations for Tracer and Span are now provided by
 // waffle_common_types.hpp class Tracer; // No longer needed here class Span; //
@@ -32,6 +32,12 @@ struct alignas(CACHE_LINE_SIZE) Tracelet {
   uint8_t padding[6]; // Padding to align the attributes array
 
   Attribute attributes[MAX_ATTRIBUTES_PER_TRACELET];
+
+  // add a function which returns an iterator to the attributes array
+  const auto attributes_begin() const { return std::begin(attributes); }
+  const auto attributes_end() const {
+    return attributes_begin() + num_attributes;
+  }
 
   // Constructor for SPAN_START, EVENT (with attributes)
   Tracelet(uint64_t ts, Id t_id, Id s_id, Id p_span_id, Id c_id,

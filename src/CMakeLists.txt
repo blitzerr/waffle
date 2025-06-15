@@ -17,6 +17,8 @@ add_library(Waffle STATIC)
 # Paths are relative to this CMakeLists.txt (i.e., the 'src' directory).
 target_sources(Waffle PRIVATE
     waffle/waffle_core.cpp
+    waffle/consumer/consumer.cpp
+    waffle/model/full_record.cpp
     # Add any other .cpp files from src/ that belong to the Waffle library here
 )
 
